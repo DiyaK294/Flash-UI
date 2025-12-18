@@ -1,15 +1,16 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
 
-//Vibe coded by ammaar@google.com
+//Vibe coded by diyak8762
 
 import { GoogleGenAI } from '@google/genai';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 
-import { Artifact, Session, ComponentVariation, LayoutOption } from './types';
+import { Artifact, Session, ComponentVariation, SavedArtifact } from './types';
 import { INITIAL_PLACEHOLDERS } from './constants';
 import { generateId } from './utils';
 
@@ -23,7 +24,10 @@ import {
     ArrowLeftIcon, 
     ArrowRightIcon, 
     ArrowUpIcon, 
-    GridIcon 
+    GridIcon,
+    BookmarkIcon,
+    LibraryIcon,
+    TrashIcon
 } from './components/Icons';
 
 function App() {
@@ -38,19 +42,34 @@ function App() {
   
   const [drawerState, setDrawerState] = useState<{
       isOpen: boolean;
-      mode: 'code' | 'variations' | null;
+      mode: 'code' | 'variations' | 'library' | null;
       title: string;
       data: any; 
   }>({ isOpen: false, mode: null, title: '', data: null });
 
   const [componentVariations, setComponentVariations] = useState<ComponentVariation[]>([]);
+  const [savedArtifacts, setSavedArtifacts] = useState<SavedArtifact[]>([]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const gridScrollRef = useRef<HTMLDivElement>(null);
 
+  // Initialize Library
   useEffect(() => {
+      const stored = localStorage.getItem('flash_ui_library');
+      if (stored) {
+          try {
+              setSavedArtifacts(JSON.parse(stored));
+          } catch (e) {
+              console.error("Failed to parse library", e);
+          }
+      }
       inputRef.current?.focus();
   }, []);
+
+  // Persist Library
+  useEffect(() => {
+      localStorage.setItem('flash_ui_library', JSON.stringify(savedArtifacts));
+  }, [savedArtifacts]);
 
   // Fix for mobile: reset scroll when focusing an item to prevent "overscroll" state
   useEffect(() => {
@@ -215,6 +234,60 @@ Required JSON Output Format (stream ONE object per line):
           const artifact = currentSession.artifacts[focusedArtifactIndex];
           setDrawerState({ isOpen: true, mode: 'code', title: 'Source Code', data: artifact.html });
       }
+  };
+
+  const handleSaveToLibrary = () => {
+      const currentSession = sessions[currentSessionIndex];
+      if (!currentSession || focusedArtifactIndex === null) return;
+      const artifact = currentSession.artifacts[focusedArtifactIndex];
+      
+      const isAlreadySaved = savedArtifacts.some(a => a.id === artifact.id || (a.html === artifact.html && a.styleName === artifact.styleName));
+      if (isAlreadySaved) return;
+
+      const newSaved: SavedArtifact = {
+          ...artifact,
+          prompt: currentSession.prompt,
+          savedAt: Date.now()
+      };
+      setSavedArtifacts(prev => [newSaved, ...prev]);
+  };
+
+  const removeFromLibrary = (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      setSavedArtifacts(prev => prev.filter(a => a.id !== id));
+  };
+
+  const useLibraryItem = (item: SavedArtifact) => {
+      // Create a new session with the library item
+      const sessionId = generateId();
+      const newSession: Session = {
+          id: sessionId,
+          prompt: item.prompt,
+          timestamp: Date.now(),
+          artifacts: [{
+              ...item,
+              id: `${sessionId}_0`,
+              status: 'complete'
+          }, {
+              id: `${sessionId}_1`,
+              styleName: 'Reserved',
+              html: '',
+              status: 'complete'
+          }, {
+              id: `${sessionId}_2`,
+              styleName: 'Reserved',
+              html: '',
+              status: 'complete'
+          }]
+      };
+      setSessions(prev => [...prev, newSession]);
+      setCurrentSessionIndex(sessions.length);
+      setFocusedArtifactIndex(0);
+      setDrawerState(s => ({ ...s, isOpen: false }));
+  };
+
+  const handleShowLibrary = () => {
+      setDrawerState({ isOpen: true, mode: 'library', title: 'Library', data: null });
   };
 
   const handleSendMessage = useCallback(async (manualPrompt?: string) => {
@@ -430,11 +503,18 @@ Return ONLY RAW HTML. No markdown fences.
       }
   }
 
+  const isCurrentSaved = focusedArtifactIndex !== null && currentSession && savedArtifacts.some(a => a.html === currentSession.artifacts[focusedArtifactIndex].html);
+
   return (
     <>
-        <a href="https://x.com/ammaar" target="_blank" rel="noreferrer" className={`creator-credit ${hasStarted ? 'hide-on-mobile' : ''}`}>
-            created by @ammaar
-        </a>
+        <div className={`top-actions ${hasStarted ? 'hide-on-mobile' : ''}`}>
+             <button className="library-toggle-btn" onClick={handleShowLibrary} title="Open Library">
+                 <LibraryIcon /> Library ({savedArtifacts.length})
+             </button>
+             <a href="https://github.com/DiyaK294" target="_blank" rel="noreferrer" className="creator-credit">
+                designed by @diyak8762
+            </a>
+        </div>
 
         <SideDrawer 
             isOpen={drawerState.isOpen} 
@@ -462,6 +542,33 @@ Return ONLY RAW HTML. No markdown fences.
                              <div className="sexy-label">{v.name}</div>
                          </div>
                     ))}
+                </div>
+            )}
+
+            {drawerState.mode === 'library' && (
+                <div className="sexy-grid">
+                    {savedArtifacts.length === 0 ? (
+                        <div className="empty-library">
+                            Your library is empty. Save your favorite designs to see them here!
+                        </div>
+                    ) : (
+                        savedArtifacts.map((item) => (
+                            <div key={item.id} className="sexy-card library-card" onClick={() => useLibraryItem(item)}>
+                                <div className="sexy-preview">
+                                    <iframe srcDoc={item.html} title={item.styleName} sandbox="allow-scripts allow-same-origin" />
+                                </div>
+                                <div className="sexy-label">
+                                    <div className="library-item-meta">
+                                        <strong>{item.styleName}</strong>
+                                        <span className="library-item-prompt">{item.prompt}</span>
+                                    </div>
+                                    <button className="delete-btn" onClick={(e) => removeFromLibrary(item.id, e)}>
+                                        <TrashIcon />
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
                 </div>
             )}
         </SideDrawer>
@@ -534,6 +641,9 @@ Return ONLY RAW HTML. No markdown fences.
                     </button>
                     <button onClick={handleGenerateVariations} disabled={isLoading}>
                         <SparklesIcon /> Variations
+                    </button>
+                    <button onClick={handleSaveToLibrary} className={isCurrentSaved ? 'saved' : ''}>
+                        <BookmarkIcon /> {isCurrentSaved ? 'Saved' : 'Save'}
                     </button>
                     <button onClick={handleShowCode}>
                         <CodeIcon /> Source

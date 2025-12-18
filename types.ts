@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -8,6 +9,11 @@ export interface Artifact {
   styleName: string;
   html: string;
   status: 'streaming' | 'complete' | 'error';
+}
+
+export interface SavedArtifact extends Artifact {
+    prompt: string;
+    savedAt: number;
 }
 
 export interface Session {
