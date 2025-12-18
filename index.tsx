@@ -278,7 +278,6 @@ Required JSON Output Format (stream ONE object per line):
   };
 
   const useLibraryItem = (item: SavedArtifact) => {
-      // Create a new session with the library item
       const sessionId = generateId();
       const newSession: Session = {
           id: sessionId,
@@ -352,37 +351,28 @@ Never use artist or brand names. Use physical and material metaphors.
 
 **CREATIVE EXAMPLES (Do not simply copy these, use them as a guide for tone):**
 - Example A: "Asymmetrical Rectilinear Blockwork" (Grid-heavy, primary pigments, thick structural strokes, Bauhaus-functionalism vibe).
-- Example B: "Grainy Risograph Layering" (Tactile paper texture, overprinted translucent inks, dithered gradients).
+- Example B: "Tactile Risograph Press" (Tactile paper texture, overprinted translucent inks, dithered gradients).
 - Example C: "Kinetic Wireframe Suspension" (Floating silhouettes, thin balancing lines, organic primary shapes).
-- Example D: "Spectral Prismatic Diffusion" (Glassmorphism, caustic refraction, soft-focus morphing gradients).
 
 **GOAL:**
-Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions (e.g. ["Tactile Risograph Press", "Kinetic Silhouette Balance", "Primary Pigment Gridwork"]).
+Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions.
         `.trim();
 
-        const styleResponse = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: { role: 'user', parts: [{ text: stylePrompt }] }
-        });
-
         let generatedStyles: string[] = [];
-        const styleText = styleResponse.text || '[]';
-        const jsonMatch = styleText.match(/\[[\s\S]*\]/);
-        
-        if (jsonMatch) {
-            try {
-                generatedStyles = JSON.parse(jsonMatch[0]);
-            } catch (e) {
-                console.warn("Failed to parse styles, using fallbacks");
-            }
+        try {
+            const styleResponse = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: { role: 'user', parts: [{ text: stylePrompt }] }
+            });
+            const styleText = styleResponse.text || '[]';
+            const jsonMatch = styleText.match(/\[[\s\S]*\]/);
+            if (jsonMatch) generatedStyles = JSON.parse(jsonMatch[0]);
+        } catch (e) {
+            console.warn("Style generation failed", e);
         }
 
         if (!generatedStyles || generatedStyles.length < 3) {
-            generatedStyles = [
-                "Primary Pigment Gridwork",
-                "Tactile Risograph Layering",
-                "Kinetic Silhouette Balance"
-            ];
+            generatedStyles = ["Primary Grid", "Tactile Press", "Kinetic Balance"];
         }
         
         generatedStyles = generatedStyles.slice(0, 3);
@@ -401,20 +391,10 @@ Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions (e.
         const generateArtifact = async (artifact: Artifact, styleInstruction: string) => {
             try {
                 const prompt = `
-You are Flash UI. Create a stunning, high-fidelity UI component for: "${trimmedInput}".
-
-**CONCEPTUAL DIRECTION: ${styleInstruction}**
-
-**VISUAL EXECUTION RULES:**
-1. **Materiality**: Use the specified metaphor to drive every CSS choice. (e.g. if Risograph, use \`feTurbulence\` for grain and \`mix-blend-mode: multiply\` for ink layering).
-2. **Typography**: Use high-quality web fonts. Pair a bold sans-serif with a refined monospace for data.
-3. **Motion**: Include subtle, high-performance CSS/JS animations (hover transitions, entry reveals).
-4. **IP SAFEGUARD**: No artist names or trademarks. 
-5. **Layout**: Be bold with negative space and hierarchy. Avoid generic cards.
-6. **Theme Support**: Design with both light and dark backgrounds in mind. Use CSS variables for colors if possible.
-
-Return ONLY RAW HTML. No markdown fences.
-          `.trim();
+Create a stunning UI component for: "${trimmedInput}".
+DIRECTION: ${styleInstruction}
+Return ONLY RAW HTML. No markdown. No brand names. Support light and dark modes.
+                `.trim();
           
                 const responseStream = await ai.models.generateContentStream({
                     model: 'gemini-3-flash-preview',
@@ -446,7 +426,7 @@ Return ONLY RAW HTML. No markdown fences.
                     sess.id === sessionId ? {
                         ...sess,
                         artifacts: sess.artifacts.map(art => 
-                            art.id === artifact.id ? { ...art, html: finalHtml, status: finalHtml ? 'complete' : 'error' } : art
+                            art.id === artifact.id ? { ...art, html: finalHtml, status: 'complete' } : art
                         )
                     } : sess
                 ));
@@ -457,7 +437,7 @@ Return ONLY RAW HTML. No markdown fences.
                     sess.id === sessionId ? {
                         ...sess,
                         artifacts: sess.artifacts.map(art => 
-                            art.id === artifact.id ? { ...art, html: `<div style="color: #ff6b6b; padding: 20px;">Error: ${e.message}</div>`, status: 'error' } : art
+                            art.id === artifact.id ? { ...art, html: `Error: ${e.message}`, status: 'error' } : art
                         )
                     } : sess
                 ));
@@ -466,8 +446,12 @@ Return ONLY RAW HTML. No markdown fences.
 
         await Promise.all(placeholderArtifacts.map((art, i) => generateArtifact(art, generatedStyles[i])));
 
-    } catch (e) {
-        console.error("Fatal error in generation process", e);
+    } catch (e: any) {
+        console.error("Fatal error", e);
+        setSessions(prev => prev.map(s => s.id === sessionId ? {
+            ...s,
+            artifacts: s.artifacts.map(art => ({ ...art, status: 'error', html: `Failed: ${e.message}` }))
+        } : s));
     } finally {
         setIsLoading(false);
         setTimeout(() => inputRef.current?.focus(), 100);
@@ -527,16 +511,10 @@ Return ONLY RAW HTML. No markdown fences.
   const isCurrentSaved = focusedArtifactIndex !== null && currentSession && savedArtifacts.some(a => a.html === currentSession.artifacts[focusedArtifactIndex].html);
 
   const wrapWithTheme = (html: string) => {
-      // Injects a small script to force light/dark mode if the component supports it or just base colors
       const themeCss = theme === 'dark' ? 
         `body { background-color: #000; color: #fff; color-scheme: dark; }` : 
         `body { background-color: #fff; color: #000; color-scheme: light; }`;
-      
-      const themeStyle = `<style>
-        :root { transition: background-color 0.3s ease, color 0.3s ease; }
-        ${themeCss}
-      </style>`;
-      
+      const themeStyle = `<style>:root { transition: background-color 0.3s ease, color 0.3s ease; } ${themeCss}</style>`;
       return themeStyle + html;
   };
 
@@ -556,22 +534,9 @@ Return ONLY RAW HTML. No markdown fences.
             </a>
         </div>
 
-        <SideDrawer 
-            isOpen={drawerState.isOpen} 
-            onClose={() => setDrawerState(s => ({...s, isOpen: false}))} 
-            title={drawerState.title}
-        >
-            {isLoadingDrawer && (
-                 <div className="loading-state">
-                     <ThinkingIcon /> 
-                     Designing variations...
-                 </div>
-            )}
-
-            {drawerState.mode === 'code' && (
-                <pre className="code-block"><code>{drawerState.data}</code></pre>
-            )}
-            
+        <SideDrawer isOpen={drawerState.isOpen} onClose={() => setDrawerState(s => ({...s, isOpen: false}))} title={drawerState.title}>
+            {isLoadingDrawer && <div className="loading-state"><ThinkingIcon /> Designing...</div>}
+            {drawerState.mode === 'code' && <pre className="code-block"><code>{drawerState.data}</code></pre>}
             {drawerState.mode === 'variations' && (
                 <div className="sexy-grid">
                     {componentVariations.map((v, i) => (
@@ -584,140 +549,69 @@ Return ONLY RAW HTML. No markdown fences.
                     ))}
                 </div>
             )}
-
             {drawerState.mode === 'library' && (
                 <div className="sexy-grid">
-                    {savedArtifacts.length === 0 ? (
-                        <div className="empty-library">
-                            Your library is empty. Save your favorite designs to see them here!
-                        </div>
-                    ) : (
-                        savedArtifacts.map((item) => (
-                            <div key={item.id} className="sexy-card library-card" onClick={() => useLibraryItem(item)}>
-                                <div className="sexy-preview">
-                                    <iframe srcDoc={wrapWithTheme(item.html)} title={item.styleName} sandbox="allow-scripts allow-same-origin" />
-                                </div>
-                                <div className="sexy-label">
-                                    <div className="library-item-meta">
-                                        <strong>{item.styleName}</strong>
-                                        <span className="library-item-prompt">{item.prompt}</span>
-                                    </div>
-                                    <button className="delete-btn" onClick={(e) => removeFromLibrary(item.id, e)}>
-                                        <TrashIcon />
-                                    </button>
-                                </div>
+                    {savedArtifacts.length === 0 ? <div className="empty-library">Empty library.</div> : savedArtifacts.map((item) => (
+                        <div key={item.id} className="sexy-card library-card" onClick={() => useLibraryItem(item)}>
+                            <div className="sexy-preview">
+                                <iframe srcDoc={wrapWithTheme(item.html)} title={item.styleName} sandbox="allow-scripts allow-same-origin" />
                             </div>
-                        ))
-                    )}
+                            <div className="sexy-label">
+                                <div className="library-item-meta"><strong>{item.styleName}</strong></div>
+                                <button className="delete-btn" onClick={(e) => removeFromLibrary(item.id, e)}><TrashIcon /></button>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             )}
         </SideDrawer>
 
         <div className="immersive-app">
-            <DottedGlowBackground 
-                gap={24} 
-                radius={1.5} 
-                color={theme === 'dark' ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.02)"} 
-                glowColor={theme === 'dark' ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)"} 
-                speedScale={0.5} 
-            />
-
+            <DottedGlowBackground gap={24} radius={1.5} color={theme === 'dark' ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.02)"} glowColor={theme === 'dark' ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)"} speedScale={0.5} />
             <div className={`stage-container ${focusedArtifactIndex !== null ? 'mode-focus' : 'mode-split'}`}>
                  <div className={`empty-state ${hasStarted ? 'fade-out' : ''}`}>
                      <div className="empty-content">
                          <h1>Flash UI</h1>
                          <p>Creative UI generation in a flash</p>
-                         <button className="surprise-button" onClick={handleSurpriseMe} disabled={isLoading}>
-                             <SparklesIcon /> Surprise Me
-                         </button>
+                         <button className="surprise-button" onClick={handleSurpriseMe} disabled={isLoading}><SparklesIcon /> Surprise Me</button>
                      </div>
                  </div>
-
                 {sessions.map((session, sIndex) => {
-                    let positionClass = 'hidden';
-                    if (sIndex === currentSessionIndex) positionClass = 'active-session';
-                    else if (sIndex < currentSessionIndex) positionClass = 'past-session';
-                    else if (sIndex > currentSessionIndex) positionClass = 'future-session';
-                    
+                    let positionClass = sIndex === currentSessionIndex ? 'active-session' : sIndex < currentSessionIndex ? 'past-session' : 'future-session';
                     return (
                         <div key={session.id} className={`session-group ${positionClass}`}>
                             <div className="artifact-grid" ref={sIndex === currentSessionIndex ? gridScrollRef : null}>
-                                {session.artifacts.map((artifact, aIndex) => {
-                                    const isFocused = focusedArtifactIndex === aIndex;
-                                    
-                                    return (
-                                        <ArtifactCard 
-                                            key={artifact.id}
-                                            artifact={artifact}
-                                            isFocused={isFocused}
-                                            theme={theme}
-                                            onClick={() => setFocusedArtifactIndex(aIndex)}
-                                        />
-                                    );
-                                })}
+                                {session.artifacts.map((artifact, aIndex) => (
+                                    <ArtifactCard key={artifact.id} artifact={artifact} isFocused={focusedArtifactIndex === aIndex} theme={theme} onClick={() => setFocusedArtifactIndex(aIndex)} />
+                                ))}
                             </div>
                         </div>
                     );
                 })}
             </div>
-
-             {canGoBack && (
-                <button className="nav-handle left" onClick={prevItem} aria-label="Previous">
-                    <ArrowLeftIcon />
-                </button>
-             )}
-             {canGoForward && (
-                <button className="nav-handle right" onClick={nextItem} aria-label="Next">
-                    <ArrowRightIcon />
-                </button>
-             )}
-
+             {canGoBack && <button className="nav-handle left" onClick={prevItem}><ArrowLeftIcon /></button>}
+             {canGoForward && <button className="nav-handle right" onClick={nextItem}><ArrowRightIcon /></button>}
             <div className={`action-bar ${focusedArtifactIndex !== null ? 'visible' : ''}`}>
-                 <div className="active-prompt-label">
-                    {currentSession?.prompt}
-                 </div>
+                 <div className="active-prompt-label">{currentSession?.prompt}</div>
                  <div className="action-buttons">
-                    <button onClick={() => setFocusedArtifactIndex(null)}>
-                        <GridIcon /> Grid View
-                    </button>
-                    <button onClick={handleGenerateVariations} disabled={isLoading}>
-                        <SparklesIcon /> Variations
-                    </button>
-                    <button onClick={handleSaveToLibrary} className={isCurrentSaved ? 'saved' : ''}>
-                        <BookmarkIcon /> {isCurrentSaved ? 'Saved' : 'Save'}
-                    </button>
-                    <button onClick={handleShowCode}>
-                        <CodeIcon /> Source
-                    </button>
+                    <button onClick={() => setFocusedArtifactIndex(null)}><GridIcon /> Grid View</button>
+                    <button onClick={handleGenerateVariations} disabled={isLoading}><SparklesIcon /> Variations</button>
+                    <button onClick={handleSaveToLibrary} className={isCurrentSaved ? 'saved' : ''}><BookmarkIcon /> {isCurrentSaved ? 'Saved' : 'Save'}</button>
+                    <button onClick={handleShowCode}><CodeIcon /> Source</button>
                  </div>
             </div>
-
             <div className="floating-input-container">
                 <div className={`input-wrapper ${isLoading ? 'loading' : ''}`}>
-                    {(!inputValue && !isLoading) && (
-                        <div className="animated-placeholder" key={placeholderIndex}>
-                            <span className="placeholder-text">{placeholders[placeholderIndex]}</span>
-                            <span className="tab-hint">Tab</span>
-                        </div>
-                    )}
+                    {(!inputValue && !isLoading) && <div className="animated-placeholder" key={placeholderIndex}><span className="placeholder-text">{placeholders[placeholderIndex]}</span><span className="tab-hint">Tab</span></div>}
                     {!isLoading ? (
-                        <input 
-                            ref={inputRef}
-                            type="text" 
-                            value={inputValue} 
-                            onChange={handleInputChange} 
-                            onKeyDown={handleKeyDown} 
-                            disabled={isLoading} 
-                        />
+                        <input ref={inputRef} type="text" value={inputValue} onChange={handleInputChange} onKeyDown={handleKeyDown} />
                     ) : (
                         <div className="input-generating-label">
                             <span className="generating-prompt-text">{currentSession?.prompt}</span>
                             <ThinkingIcon />
                         </div>
                     )}
-                    <button className="send-button" onClick={() => handleSendMessage()} disabled={isLoading || !inputValue.trim()}>
-                        <ArrowUpIcon />
-                    </button>
+                    <button className="send-button" onClick={() => handleSendMessage()} disabled={isLoading || !inputValue.trim()}><ArrowUpIcon /></button>
                 </div>
             </div>
         </div>
