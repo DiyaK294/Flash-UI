@@ -27,8 +27,12 @@ import {
     GridIcon,
     BookmarkIcon,
     LibraryIcon,
-    TrashIcon
+    TrashIcon,
+    SunIcon,
+    MoonIcon
 } from './components/Icons';
+
+type Theme = 'light' | 'dark';
 
 function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -39,6 +43,7 @@ function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [placeholders, setPlaceholders] = useState<string[]>(INITIAL_PLACEHOLDERS);
+  const [theme, setTheme] = useState<Theme>('dark');
   
   const [drawerState, setDrawerState] = useState<{
       isOpen: boolean;
@@ -53,8 +58,15 @@ function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const gridScrollRef = useRef<HTMLDivElement>(null);
 
-  // Initialize Library
+  // Initialize Theme and Library
   useEffect(() => {
+      const storedTheme = localStorage.getItem('flash_ui_theme') as Theme;
+      if (storedTheme) {
+          setTheme(storedTheme);
+      } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+          setTheme('light');
+      }
+
       const stored = localStorage.getItem('flash_ui_library');
       if (stored) {
           try {
@@ -65,6 +77,12 @@ function App() {
       }
       inputRef.current?.focus();
   }, []);
+
+  // Update theme on root element
+  useEffect(() => {
+      document.documentElement.setAttribute('data-theme', theme);
+      localStorage.setItem('flash_ui_theme', theme);
+  }, [theme]);
 
   // Persist Library
   useEffect(() => {
@@ -120,6 +138,8 @@ function App() {
       };
       setTimeout(fetchDynamicPlaceholders, 1000);
   }, []);
+
+  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(event.target.value);
@@ -391,6 +411,7 @@ You are Flash UI. Create a stunning, high-fidelity UI component for: "${trimmedI
 3. **Motion**: Include subtle, high-performance CSS/JS animations (hover transitions, entry reveals).
 4. **IP SAFEGUARD**: No artist names or trademarks. 
 5. **Layout**: Be bold with negative space and hierarchy. Avoid generic cards.
+6. **Theme Support**: Design with both light and dark backgrounds in mind. Use CSS variables for colors if possible.
 
 Return ONLY RAW HTML. No markdown fences.
           `.trim();
@@ -505,12 +526,31 @@ Return ONLY RAW HTML. No markdown fences.
 
   const isCurrentSaved = focusedArtifactIndex !== null && currentSession && savedArtifacts.some(a => a.html === currentSession.artifacts[focusedArtifactIndex].html);
 
+  const wrapWithTheme = (html: string) => {
+      // Injects a small script to force light/dark mode if the component supports it or just base colors
+      const themeCss = theme === 'dark' ? 
+        `body { background-color: #000; color: #fff; color-scheme: dark; }` : 
+        `body { background-color: #fff; color: #000; color-scheme: light; }`;
+      
+      const themeStyle = `<style>
+        :root { transition: background-color 0.3s ease, color 0.3s ease; }
+        ${themeCss}
+      </style>`;
+      
+      return themeStyle + html;
+  };
+
   return (
     <>
         <div className={`top-actions ${hasStarted ? 'hide-on-mobile' : ''}`}>
-             <button className="library-toggle-btn" onClick={handleShowLibrary} title="Open Library">
-                 <LibraryIcon /> Library ({savedArtifacts.length})
-             </button>
+             <div className="top-actions-left">
+                <button className="theme-toggle-btn" onClick={toggleTheme} title="Toggle Theme">
+                    {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+                </button>
+                <button className="library-toggle-btn" onClick={handleShowLibrary} title="Open Library">
+                    <LibraryIcon /> Library ({savedArtifacts.length})
+                </button>
+             </div>
              <a href="https://github.com/DiyaK294" target="_blank" rel="noreferrer" className="creator-credit">
                 designed by @diyak8762
             </a>
@@ -537,7 +577,7 @@ Return ONLY RAW HTML. No markdown fences.
                     {componentVariations.map((v, i) => (
                          <div key={i} className="sexy-card" onClick={() => applyVariation(v.html)}>
                              <div className="sexy-preview">
-                                 <iframe srcDoc={v.html} title={v.name} sandbox="allow-scripts allow-same-origin" />
+                                 <iframe srcDoc={wrapWithTheme(v.html)} title={v.name} sandbox="allow-scripts allow-same-origin" />
                              </div>
                              <div className="sexy-label">{v.name}</div>
                          </div>
@@ -555,7 +595,7 @@ Return ONLY RAW HTML. No markdown fences.
                         savedArtifacts.map((item) => (
                             <div key={item.id} className="sexy-card library-card" onClick={() => useLibraryItem(item)}>
                                 <div className="sexy-preview">
-                                    <iframe srcDoc={item.html} title={item.styleName} sandbox="allow-scripts allow-same-origin" />
+                                    <iframe srcDoc={wrapWithTheme(item.html)} title={item.styleName} sandbox="allow-scripts allow-same-origin" />
                                 </div>
                                 <div className="sexy-label">
                                     <div className="library-item-meta">
@@ -577,8 +617,8 @@ Return ONLY RAW HTML. No markdown fences.
             <DottedGlowBackground 
                 gap={24} 
                 radius={1.5} 
-                color="rgba(255, 255, 255, 0.02)" 
-                glowColor="rgba(255, 255, 255, 0.15)" 
+                color={theme === 'dark' ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.02)"} 
+                glowColor={theme === 'dark' ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)"} 
                 speedScale={0.5} 
             />
 
@@ -610,6 +650,7 @@ Return ONLY RAW HTML. No markdown fences.
                                             key={artifact.id}
                                             artifact={artifact}
                                             isFocused={isFocused}
+                                            theme={theme}
                                             onClick={() => setFocusedArtifactIndex(aIndex)}
                                         />
                                     );
