@@ -6,7 +6,7 @@
 
 //Vibe coded by diyak8762
 
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 
@@ -31,6 +31,14 @@ import {
     SunIcon,
     MoonIcon
 } from './components/Icons';
+
+// Fix for TypeScript "Cannot find name 'process'"
+declare const process: {
+  env: {
+    API_KEY: string;
+    [key: string]: string | undefined;
+  };
+};
 
 type Theme = 'light' | 'dark';
 
@@ -145,11 +153,14 @@ function App() {
     setInputValue(event.target.value);
   };
 
-  const parseJsonStream = async function* (responseStream: AsyncGenerator<{ text: string }>) {
+  /**
+   * Fixes the TS2345 error by correctly typing the generator and handling undefined text.
+   */
+  const parseJsonStream = async function* (responseStream: AsyncIterable<GenerateContentResponse>) {
       let buffer = '';
       for await (const chunk of responseStream) {
           const text = chunk.text;
-          if (typeof text !== 'string') continue;
+          if (!text) continue;
           buffer += text;
           let braceCount = 0;
           let start = buffer.indexOf('{');
