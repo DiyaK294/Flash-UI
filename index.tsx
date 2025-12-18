@@ -7,12 +7,13 @@
 //Vibe coded by diyak8762
 
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 
 import { Artifact, Session, ComponentVariation, SavedArtifact } from './types';
 import { INITIAL_PLACEHOLDERS } from './constants';
 import { generateId } from './utils';
+import { READY_MADE_TEMPLATES, Template } from './templates';
 
 import DottedGlowBackground from './components/DottedGlowBackground';
 import ArtifactCard from './components/ArtifactCard';
@@ -21,15 +22,20 @@ import {
     ThinkingIcon, 
     CodeIcon, 
     SparklesIcon, 
+    ImageIcon,
+    DownloadIcon,
     ArrowLeftIcon, 
     ArrowRightIcon, 
     ArrowUpIcon, 
     GridIcon,
     BookmarkIcon,
     LibraryIcon,
+    LayoutIcon,
     TrashIcon,
     SunIcon,
-    MoonIcon
+    MoonIcon,
+    SearchIcon,
+    MagicIcon
 } from './components/Icons';
 
 // Fix for TypeScript "Cannot find name 'process'"
@@ -48,6 +54,7 @@ function App() {
   const [focusedArtifactIndex, setFocusedArtifactIndex] = useState<number | null>(null);
   
   const [inputValue, setInputValue] = useState<string>('');
+  const [librarySearchQuery, setLibrarySearchQuery] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [placeholders, setPlaceholders] = useState<string[]>(INITIAL_PLACEHOLDERS);
@@ -55,13 +62,14 @@ function App() {
   
   const [drawerState, setDrawerState] = useState<{
       isOpen: boolean;
-      mode: 'code' | 'variations' | 'library' | null;
+      mode: 'code' | 'variations' | 'library' | 'image' | 'templates' | null;
       title: string;
       data: any; 
   }>({ isOpen: false, mode: null, title: '', data: null });
 
   const [componentVariations, setComponentVariations] = useState<ComponentVariation[]>([]);
   const [savedArtifacts, setSavedArtifacts] = useState<SavedArtifact[]>([]);
+  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const gridScrollRef = useRef<HTMLDivElement>(null);
@@ -153,9 +161,6 @@ function App() {
     setInputValue(event.target.value);
   };
 
-  /**
-   * Fixes the TS2345 error by correctly typing the generator and handling undefined text.
-   */
   const parseJsonStream = async function* (responseStream: AsyncIterable<GenerateContentResponse>) {
       let buffer = '';
       for await (const chunk of responseStream) {
@@ -190,6 +195,51 @@ function App() {
           }
       }
   };
+
+  const handleGenerateImage = useCallback(async () => {
+    const currentSession = sessions[currentSessionIndex];
+    if (!currentSession || focusedArtifactIndex === null) return;
+    const currentArtifact = currentSession.artifacts[focusedArtifactIndex];
+
+    setIsLoading(true);
+    setGeneratedImages([]);
+    setDrawerState({ isOpen: true, mode: 'image', title: 'Asset Generation', data: currentArtifact.id });
+
+    try {
+        const apiKey = process.env.API_KEY;
+        if (!apiKey) throw new Error("API_KEY is not configured.");
+        const ai = new GoogleGenAI({ apiKey });
+
+        const imagePrompt = `A high-quality, professional UI asset for a "${currentSession.prompt}". DIRECTION: ${currentArtifact.styleName}. The asset should be an icon, hero illustration, or texture suitable for a modern web interface. Clean composition, appropriate for ${theme} mode. No text. No brand names. Highly detailed.`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ text: imagePrompt }] },
+            config: {
+                imageConfig: {
+                    aspectRatio: "1:1"
+                }
+            }
+        });
+
+        const imageParts = response.candidates?.[0]?.content?.parts || [];
+        const newImages: string[] = [];
+
+        for (const part of imageParts) {
+            if (part.inlineData) {
+                newImages.push(`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`);
+            }
+        }
+
+        if (newImages.length > 0) {
+            setGeneratedImages(newImages);
+        }
+    } catch (e: any) {
+        console.error("Error generating image:", e);
+    } finally {
+        setIsLoading(false);
+    }
+  }, [sessions, currentSessionIndex, focusedArtifactIndex, theme]);
 
   const handleGenerateVariations = useCallback(async () => {
     const currentSession = sessions[currentSessionIndex];
@@ -288,24 +338,28 @@ Required JSON Output Format (stream ONE object per line):
       setSavedArtifacts(prev => prev.filter(a => a.id !== id));
   };
 
-  const useLibraryItem = (item: SavedArtifact) => {
+  const useLibraryItem = (item: SavedArtifact | Template) => {
       const sessionId = generateId();
+      const prompt = 'prompt' in item ? item.prompt : `Template: ${item.name}`;
+      const styleName = 'styleName' in item ? item.styleName : item.name;
+
       const newSession: Session = {
           id: sessionId,
-          prompt: item.prompt,
+          prompt: prompt,
           timestamp: Date.now(),
           artifacts: [{
-              ...item,
               id: `${sessionId}_0`,
+              styleName: styleName,
+              html: item.html,
               status: 'complete'
           }, {
               id: `${sessionId}_1`,
-              styleName: 'Reserved',
+              styleName: 'Variant B',
               html: '',
               status: 'complete'
           }, {
               id: `${sessionId}_2`,
-              styleName: 'Reserved',
+              styleName: 'Variant C',
               html: '',
               status: 'complete'
           }]
@@ -317,7 +371,13 @@ Required JSON Output Format (stream ONE object per line):
   };
 
   const handleShowLibrary = () => {
-      setDrawerState({ isOpen: true, mode: 'library', title: 'Library', data: null });
+      setLibrarySearchQuery('');
+      setDrawerState({ isOpen: true, mode: 'library', title: 'Collection', data: null });
+  };
+
+  const handleShowTemplates = () => {
+      setLibrarySearchQuery('');
+      setDrawerState({ isOpen: true, mode: 'templates', title: 'Templates', data: null });
   };
 
   const handleSendMessage = useCallback(async (manualPrompt?: string) => {
@@ -501,7 +561,7 @@ Return ONLY RAW HTML. No markdown. No brand names. Support light and dark modes.
       }
   }, [currentSessionIndex, focusedArtifactIndex]);
 
-  const isLoadingDrawer = isLoading && drawerState.mode === 'variations' && componentVariations.length === 0;
+  const isLoadingDrawer = isLoading && (drawerState.mode === 'variations' || drawerState.mode === 'image') && (componentVariations.length === 0 && generatedImages.length === 0);
 
   const hasStarted = sessions.length > 0 || isLoading;
   const currentSession = sessions[currentSessionIndex];
@@ -521,6 +581,25 @@ Return ONLY RAW HTML. No markdown. No brand names. Support light and dark modes.
 
   const isCurrentSaved = focusedArtifactIndex !== null && currentSession && savedArtifacts.some(a => a.html === currentSession.artifacts[focusedArtifactIndex].html);
 
+  const filteredLibrary = useMemo(() => {
+    if (!librarySearchQuery) return savedArtifacts;
+    const q = librarySearchQuery.toLowerCase();
+    return savedArtifacts.filter(item => 
+        item.styleName.toLowerCase().includes(q) || 
+        item.prompt.toLowerCase().includes(q)
+    );
+  }, [savedArtifacts, librarySearchQuery]);
+
+  const filteredTemplates = useMemo(() => {
+    if (!librarySearchQuery) return READY_MADE_TEMPLATES;
+    const q = librarySearchQuery.toLowerCase();
+    return READY_MADE_TEMPLATES.filter(item => 
+        item.name.toLowerCase().includes(q) || 
+        item.description.toLowerCase().includes(q) ||
+        item.category.toLowerCase().includes(q)
+    );
+  }, [librarySearchQuery]);
+
   const wrapWithTheme = (html: string) => {
       const themeCss = theme === 'dark' ? 
         `body { background-color: #000; color: #fff; color-scheme: dark; }` : 
@@ -531,14 +610,19 @@ Return ONLY RAW HTML. No markdown. No brand names. Support light and dark modes.
 
   return (
     <>
-        <div className={`top-actions ${hasStarted ? 'hide-on-mobile' : ''}`}>
+        <div className={`top-actions ${hasStarted ? 'hide-on-mobile' : ''} ${focusedArtifactIndex !== null ? 'focus-mode-dim' : ''}`}>
              <div className="top-actions-left">
                 <button className="theme-toggle-btn" onClick={toggleTheme} title="Toggle Theme">
                     {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
                 </button>
-                <button className="library-toggle-btn" onClick={handleShowLibrary} title="Open Library">
-                    <LibraryIcon /> Library ({savedArtifacts.length})
-                </button>
+                <div className="segmented-control">
+                    <button className={`control-btn ${drawerState.mode === 'library' ? 'active' : ''}`} onClick={handleShowLibrary}>
+                        <BookmarkIcon /> Saved
+                    </button>
+                    <button className={`control-btn ${drawerState.mode === 'templates' ? 'active' : ''}`} onClick={handleShowTemplates}>
+                        <LayoutIcon /> Templates
+                    </button>
+                </div>
              </div>
              <a href="https://github.com/DiyaK294" target="_blank" rel="noreferrer" className="creator-credit">
                 designed by @diyak8762
@@ -546,8 +630,21 @@ Return ONLY RAW HTML. No markdown. No brand names. Support light and dark modes.
         </div>
 
         <SideDrawer isOpen={drawerState.isOpen} onClose={() => setDrawerState(s => ({...s, isOpen: false}))} title={drawerState.title}>
+            {(drawerState.mode === 'library' || drawerState.mode === 'templates') && (
+                <div className="library-search-container">
+                    <SearchIcon />
+                    <input 
+                        type="text" 
+                        placeholder={`Search ${drawerState.mode === 'library' ? 'saved designs' : 'templates'}...`}
+                        value={librarySearchQuery}
+                        onChange={(e) => setLibrarySearchQuery(e.target.value)}
+                    />
+                </div>
+            )}
+            
             {isLoadingDrawer && <div className="loading-state"><ThinkingIcon /> Designing...</div>}
             {drawerState.mode === 'code' && <pre className="code-block"><code>{drawerState.data}</code></pre>}
+            
             {drawerState.mode === 'variations' && (
                 <div className="sexy-grid">
                     {componentVariations.map((v, i) => (
@@ -560,15 +657,57 @@ Return ONLY RAW HTML. No markdown. No brand names. Support light and dark modes.
                     ))}
                 </div>
             )}
+            
+            {drawerState.mode === 'templates' && (
+                <div className="sexy-grid">
+                    {filteredTemplates.length === 0 ? <div className="empty-library">No templates match your search.</div> : filteredTemplates.map((item) => (
+                        <div key={item.id} className="sexy-card library-card" onClick={() => useLibraryItem(item)}>
+                            <div className="sexy-preview">
+                                <iframe srcDoc={wrapWithTheme(item.html)} title={item.name} sandbox="allow-scripts allow-same-origin" />
+                            </div>
+                            <div className="sexy-label">
+                                <div className="library-item-meta">
+                                    <div className="template-badge">{item.category}</div>
+                                    <strong>{item.name}</strong>
+                                    <div className="library-item-prompt">{item.description}</div>
+                                </div>
+                                <div className="template-action-hint"><MagicIcon /></div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {drawerState.mode === 'image' && (
+                <div className="sexy-grid">
+                    {!isLoading && generatedImages.length === 0 && <div className="empty-library">Failed to generate asset.</div>}
+                    {generatedImages.map((img, i) => (
+                        <div key={i} className="image-asset-card">
+                            <div className="image-preview-container">
+                                <img src={img} alt="Generated Asset" />
+                                <a href={img} download={`asset_${i}.png`} className="image-download-btn"><DownloadIcon /> Download</a>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+            
             {drawerState.mode === 'library' && (
                 <div className="sexy-grid">
-                    {savedArtifacts.length === 0 ? <div className="empty-library">Empty library.</div> : savedArtifacts.map((item) => (
+                    {filteredLibrary.length === 0 ? (
+                        <div className="empty-library">
+                            {librarySearchQuery ? "No designs found for your search." : "Empty library. Save a design to see it here."}
+                        </div>
+                    ) : filteredLibrary.map((item) => (
                         <div key={item.id} className="sexy-card library-card" onClick={() => useLibraryItem(item)}>
                             <div className="sexy-preview">
                                 <iframe srcDoc={wrapWithTheme(item.html)} title={item.styleName} sandbox="allow-scripts allow-same-origin" />
                             </div>
                             <div className="sexy-label">
-                                <div className="library-item-meta"><strong>{item.styleName}</strong></div>
+                                <div className="library-item-meta">
+                                    <strong>{item.styleName}</strong>
+                                    <div className="library-item-prompt">{item.prompt}</div>
+                                </div>
                                 <button className="delete-btn" onClick={(e) => removeFromLibrary(item.id, e)}><TrashIcon /></button>
                             </div>
                         </div>
@@ -577,14 +716,17 @@ Return ONLY RAW HTML. No markdown. No brand names. Support light and dark modes.
             )}
         </SideDrawer>
 
-        <div className="immersive-app">
+        <div className={`immersive-app ${focusedArtifactIndex !== null ? 'app-focus-blur' : ''}`}>
             <DottedGlowBackground gap={24} radius={1.5} color={theme === 'dark' ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.02)"} glowColor={theme === 'dark' ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)"} speedScale={0.5} />
             <div className={`stage-container ${focusedArtifactIndex !== null ? 'mode-focus' : 'mode-split'}`}>
                  <div className={`empty-state ${hasStarted ? 'fade-out' : ''}`}>
                      <div className="empty-content">
                          <h1>Flash UI</h1>
                          <p>Creative UI generation in a flash</p>
-                         <button className="surprise-button" onClick={handleSurpriseMe} disabled={isLoading}><SparklesIcon /> Surprise Me</button>
+                         <div className="empty-actions">
+                            <button className="surprise-button" onClick={handleSurpriseMe} disabled={isLoading}><SparklesIcon /> Surprise Me</button>
+                            <button className="surprise-button ghost" onClick={handleShowTemplates} disabled={isLoading}><LayoutIcon /> Explore Templates</button>
+                         </div>
                      </div>
                  </div>
                 {sessions.map((session, sIndex) => {
@@ -607,11 +749,12 @@ Return ONLY RAW HTML. No markdown. No brand names. Support light and dark modes.
                  <div className="action-buttons">
                     <button onClick={() => setFocusedArtifactIndex(null)}><GridIcon /> Grid View</button>
                     <button onClick={handleGenerateVariations} disabled={isLoading}><SparklesIcon /> Variations</button>
+                    <button onClick={handleGenerateImage} disabled={isLoading}><ImageIcon /> Asset Gen</button>
                     <button onClick={handleSaveToLibrary} className={isCurrentSaved ? 'saved' : ''}><BookmarkIcon /> {isCurrentSaved ? 'Saved' : 'Save'}</button>
                     <button onClick={handleShowCode}><CodeIcon /> Source</button>
                  </div>
             </div>
-            <div className="floating-input-container">
+            <div className={`floating-input-container ${focusedArtifactIndex !== null ? 'focus-mode-dim' : ''}`}>
                 <div className={`input-wrapper ${isLoading ? 'loading' : ''}`}>
                     {(!inputValue && !isLoading) && <div className="animated-placeholder" key={placeholderIndex}><span className="placeholder-text">{placeholders[placeholderIndex]}</span><span className="tab-hint">Tab</span></div>}
                     {!isLoading ? (
@@ -626,6 +769,7 @@ Return ONLY RAW HTML. No markdown. No brand names. Support light and dark modes.
                 </div>
             </div>
         </div>
+        {focusedArtifactIndex !== null && <div className="focus-backdrop" onClick={() => setFocusedArtifactIndex(null)} />}
     </>
   );
 }
