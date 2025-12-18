@@ -6,6 +6,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { Artifact } from '../types';
+import { ThinkingIcon } from './Icons';
 
 interface ArtifactCardProps {
     artifact: Artifact;
@@ -53,6 +54,7 @@ const ArtifactCard = React.memo(({
         >
             <div className="artifact-header">
                 <span className="artifact-style-tag">{artifact.styleName}</span>
+                {isBlurring && <ThinkingIcon />}
             </div>
             <div className="artifact-card-inner">
                 {isBlurring && (
